@@ -1,0 +1,269 @@
+---
+title: "Proiect_MR"
+author: "Mihalache&Bajan"
+date: "2024-05-12"
+output: html_document
+---
+
+# 1.Librarii folosite
+
+```{r}
+install.packages("tidytuesdayR") 
+install.packages("tidyverse") 
+install.packages("here") 
+install.packages("fs") 
+install.packages("withr") 
+install.packages("dplyr") 
+install.packages("ggplot2") 
+install.packages("pROC") 
+install.packages("broom") 
+install.packages("glmnet") 
+install.packages("car")
+```
+
+```{r}
+library(tidyverse) 
+library(readxl) 
+library(here) 
+library(fs) 
+library(withr) 
+library(dplyr) 
+library(ggplot2) 
+library(pROC) 
+library(broom) 
+library(glmnet) 
+library(car)
+```
+
+# 2.Setul de date
+
+```{r}
+#data <- tidytuesdayR::tt_load('2024-01-23') 
+data <- read_csv("english_education.csv")   # încărcarea datelor
+```
+
+```{r}
+head(data)      # vizualizarea datelor
+```
+
+# 3.Analiza exploratorie a setului de date
+
+```{r}
+str(data)       # structura datelor
+```
+
+```{r}
+summary(data)   # sumarul datelor
+```
+
+```{r}
+# selectarea datelor relevante 
+relevant_data <- data %>%   
+  select("town11nm", "size_flag", "education_score")  
+
+# media scorurilor de educație pentru fiecare dimensiune de oraș
+education_scores_summary <- relevant_data %>%   
+  group_by(size_flag) %>%   
+  summarise(avg_education_score = mean(education_score))  
+
+# graficul 
+ggplot(education_scores_summary,         
+       aes(x = size_flag,             
+           y = avg_education_score)) +   
+  geom_bar(stat = "identity",             
+           fill = "pink") +   
+  labs(title = "Media scorurilor de educație în funcție mărimea orașului",        
+       x = "Mărimea orașului",        
+       y = "Media scorurilor de educație") +   
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +   
+  theme_minimal() +   
+  theme(plot.title = element_text(size = 16, face = "bold"),         
+        axis.title = element_text(size = 14),         
+        axis.text = element_text(size = 7)) 
+```
+
+# 4.Regresia logistică simplă
+
+```{r}
+# convertirea variabilei education_score în formă binară 
+selected_data <- data %>%   
+  mutate(education_binary = ifelse(education_score >= 0, 1, 0))  
+
+logit_model_s <- glm(education_binary ~ population_2011, 
+                     data = selected_data, 
+                     family = binomial)  
+
+# rezumatului modelului 
+summary(logit_model_s)
+```
+
+```{r}
+# grafic 
+ggplot(selected_data,         
+       aes(x = population_2011,             
+           y = education_binary)) +   
+  geom_point() +                 # punctele pentru fiecare observație   
+  geom_smooth(method = "glm",    # curba de regresie logistică               
+              method.args = list(family = "binomial"),                
+              se = TRUE,               
+              color = "magenta",                
+              fill = "orange") +     
+  labs(title = "Regresie Logistică Simplă",        
+       x = "Populație din 2011",        
+       y = "Probabilitatea scorului educațional >= 0") +   
+  theme_minimal()  # aspect vizual minimalist 
+```
+
+```{r}
+# CURBA ROC 
+predicted_probs <- predict(logit_model_s,                             
+                           newdata = selected_data,                           
+                           type = "response")  
+
+roc_obj <- roc(selected_data$education_binary, predicted_probs)  
+
+auc_value <- auc(roc_obj) 
+print(paste("AUC Value:", auc_value))  
+
+plot(roc_obj,       
+     main = "Curba ROC pentru regresia logistică simplă",      
+     xlab = "False Positive Rate",       
+     ylab = "True Positive Rate",      
+     col = "purple")  
+
+abline(a = 0, b = 1, col = "black")
+```
+
+# 5.Regresie logistică multiplă
+
+```{r}
+# regresia logistică multiplă 
+logit_model_m <- glm(education_binary ~ population_2011 +                   
+                       level4qual_residents35_64_2011 +                        
+                       key_stage_2_attainment_school_year_2007_to_2008 +          
+                       key_stage_4_attainment_school_year_2012_to_2013,                      
+                     family = binomial, 
+                     data = selected_data)  
+
+# rezumatul modelului 
+summary(logit_model_m)
+```
+
+```{r}
+# coeficienții modelului 
+data_coeficient <- tidy(logit_model_m)  
+
+ggplot(data_coeficient,         
+       aes(x = term,            
+           y = estimate,             
+           ymin = estimate - std.error,             
+           ymax = estimate + std.error)) +        
+  geom_pointrange() +        
+  coord_flip() +        
+  labs(title = "Estimările coeficienților cu intervale de încredere",              
+       y = "Estimare",              
+       x = "Predictori") +        
+  theme_minimal()
+```
+
+```{r}
+# CURBA ROC 
+probabilitati <- predict(logit_model_m,                           
+                         newdata = selected_data,                           
+                         type = "response")  
+
+if (length(probabilitati) != length(selected_data$education_binary)) {   
+  stop("Diferență în lungimile vectorilor") }  
+
+rezultat_roc <- roc(response = selected_data$education_binary,                    
+                    predictor = probabilitati)  
+
+auc_value <- auc(rezultat_roc) 
+print(paste("AUC Value:", auc_value))  
+
+plot(rezultat_roc,       
+     main = "Curba ROC pentru regresia logistică multiplă",      
+     xlab = "False Positive Rate",       
+     ylab = "True Positive Rate",       
+     col = "red")  
+
+abline(0, 1, col = "darkred") 
+```
+
+# 6.Regresie logistică multiplă 2
+
+```{r}
+# regresia logistică multiplă cu mai multe variabile independente 
+logit_model_m2 <- glm(education_binary ~ population_2011 +                         
+                        level4qual_residents35_64_2011 +                         
+                        key_stage_2_attainment_school_year_2007_to_2008 +         
+                        key_stage_4_attainment_school_year_2012_to_2013 +         
+                        activity_at_age_19_full_time_higher_education +           
+                        activity_at_age_19_sustained_further_education +          
+                        activity_at_age_19_appprenticeships +                     
+                        activity_at_age_19_employment_with_earnings_above_0 +     
+                        activity_at_age_19_employment_with_earnings_above_10_000 +                         activity_at_age_19_out_of_work,                       
+                      family = binomial,                        
+                      data = selected_data)  
+
+#  rezumatul modelului 
+summary(logit_model_m2)
+```
+
+```{r}
+# coeficienții modelului 
+data_coeficient2 <- tidy(logit_model_m2)  
+
+ggplot(data_coeficient2,         
+       aes(x = term,             
+           y = estimate,             
+           ymin = estimate - std.error,             
+           ymax = estimate + std.error)) +        
+  geom_pointrange() +        
+  coord_flip() +        
+  labs(title = "Estimările coeficienților cu intervale de încredere",              
+       y = "Estimare",              
+       x = "Predictori") +        
+  theme_minimal()
+```
+
+```{r}
+# CURBA ROC 
+probabilitati <- predict(logit_model_m2,                           
+                         newdata = selected_data,                           
+                         type = "response")  
+
+if (length(probabilitati) != length(selected_data$education_binary)) {   
+  stop("Diferență în lungimile vectorilor") }  
+
+rezultat_roc <- roc(response = selected_data$education_binary,                    
+                    predictor = probabilitati)  
+
+auc_value <- auc(rezultat_roc) 
+print(paste("AUC Value:", auc_value))  
+
+plot(rezultat_roc,       
+     main = "Curba ROC pentru regresia logistică multiplă 2",      
+     xlab = "False Positive Rate",       
+     ylab = "True Positive Rate",       
+     col = "violet")  
+
+abline(0, 1, col = "lightgreen")  
+```
+
+```{r}
+if (!requireNamespace("caret", quietly = TRUE)) {   
+  install.packages("caret") } 
+if (!requireNamespace("e1071", quietly = TRUE)) {   
+  install.packages("e1071") } 
+library(caret)
+```
+
+```{r}
+# MATRICEA DE CONFUZIE 
+predicted_classes <- ifelse(probabilitati > 0.5, 1, 0)  
+
+conf_matrix <- confusionMatrix(as.factor(predicted_classes),                      
+                               as.factor(selected_data$education_binary)) 
+print(conf_matrix)
+```
